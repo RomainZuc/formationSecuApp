@@ -1,48 +1,103 @@
 const express = require('express');
 const bodyParser = require('body-parser');
-const db = require('./database'); // Importer la base de données
+const sqlite3 = require('sqlite3').verbose();
 
 const app = express();
 const PORT = 3000;
 
-// Middleware pour traiter les requêtes POST (formulaires)
-app.use(bodyParser.urlencoded({ extended: true }));
+// Middleware pour parser les requêtes JSON
+app.use(bodyParser.json());
 
-// Page de login (formulaire)
-app.get('/', (req, res) => {
-    res.send(`
-        <h1>Login</h1>
-        <form method="POST" action="/login">
-            <label>Nom d'utilisateur :</label>
-            <input type="text" name="username" required />
-            <br />
-            <label>Mot de passe :</label>
-            <input type="password" name="password" required />
-            <br />
-            <button type="submit">Se connecter</button>
-        </form>
-    `);
+// Connexion à la base de données SQLite
+const db = new sqlite3.Database('./users.db', (err) => {
+    if (err) {
+        console.error("Erreur lors de la connexion à la base de données :", err.message);
+    } else {
+        console.log("Base de données connectée !");
+        db.run(`
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL
+            )
+        `);
+    }
 });
 
-// Route pour gérer les connexions
-app.post('/login', (req, res) => {
+// Route pour ajouter un utilisateur
+app.post('/add-user', (req, res) => {
     const { username, password } = req.body;
 
-    // Vérifier l'utilisateur dans la base de données
-    const query = `SELECT * FROM users WHERE username = ? AND password = ?`;
-    db.get(query, [username, password], (err, row) => {
+    if (!username || !password) {
+        return res.status(400).json({ message: "Le nom d'utilisateur et le mot de passe sont requis." });
+    }
+
+    const sql = `INSERT INTO users (username, password) VALUES (?, ?)`;
+    db.run(sql, [username, password], (err) => {
         if (err) {
-            console.error(err.message);
-            res.status(500).send("Erreur du serveur.");
-        } else if (row) {
-            res.send(`<h2>Bienvenue, ${username} !</h2>`);
-        } else {
-            res.send(`<h2>Nom d'utilisateur ou mot de passe incorrect.</h2>`);
+            return res.status(500).json({ message: "Erreur lors de l'ajout de l'utilisateur.", error: err.message });
         }
+        res.status(201).json({ message: "Utilisateur ajouté avec succès !" });
     });
 });
 
-// Démarrer le serveur
+// Route pour modifier un utilisateur
+app.put('/update-user/:username', (req, res) => {
+    const { username } = req.params;
+    const { password } = req.body;
+
+    if (!password) {
+        return res.status(400).json({ message: "Le mot de passe est requis pour la mise à jour." });
+    }
+
+    const sql = `UPDATE users SET password = ? WHERE username = ?`;
+    db.run(sql, [password, username], function (err) {
+        if (err) {
+            return res.status(500).json({ message: "Erreur lors de la mise à jour de l'utilisateur.", error: err.message });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ message: "Utilisateur non trouvé." });
+        }
+        res.json({ message: "Utilisateur mis à jour avec succès !" });
+    });
+});
+
+// Route pour supprimer un utilisateur
+app.delete('/delete-user/:username', (req, res) => {
+    const { username } = req.params;
+
+    const sql = `DELETE FROM users WHERE username = ?`;
+    db.run(sql, [username], function (err) {
+        if (err) {
+            return res.status(500).json({ message: "Erreur lors de la suppression de l'utilisateur.", error: err.message });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ message: "Utilisateur non trouvé." });
+        }
+        res.json({ message: "Utilisateur supprimé avec succès !" });
+    });
+});
+
+// Route pour récupérer tous les utilisateurs
+app.get('/users', (req, res) => {
+    const sql = `SELECT username FROM users`;
+
+    db.all(sql, [], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ message: "Erreur lors de la récupération des utilisateurs.", error: err.message });
+        }
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: "Aucun utilisateur trouvé dans la base de données." });
+        }
+
+        res.json({
+            message: "Liste des utilisateurs récupérée avec succès !",
+            users: rows
+        });
+    });
+});
+
+// Lancer le serveur
 app.listen(PORT, () => {
     console.log(`Serveur démarré sur http://localhost:${PORT}`);
 });
